@@ -5,7 +5,7 @@ const cors = require('cors');
 const errorHandler = require('./src/middleware/errorHandler.middleware');
 
 // Cargar variables de entorno
-dotenv.config();
+dotenv.config({ path: './.env' });
 
 // Importar rutas
 const authRoutes = require('./src/routes/auth.routes');
