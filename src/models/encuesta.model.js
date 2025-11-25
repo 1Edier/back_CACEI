@@ -30,12 +30,12 @@ const resolveJsonPath = (obj, path) => {
 };
 
 // --- CRUD de Encuestas ---
-Encuesta.create = async ({ nombre, descripcion, fecha_inicio, fecha_fin }) => {
+Encuesta.create = async ({ nombre, descripcion, fecha_inicio, fecha_fin, para_externos = false }) => {
     const [result] = await pool.execute(
-        'INSERT INTO encuestas (nombre, descripcion, fecha_inicio, fecha_fin) VALUES (?, ?, ?, ?)',
-        [nombre, descripcion, fecha_inicio, fecha_fin]
+        'INSERT INTO encuestas (nombre, descripcion, fecha_inicio, fecha_fin, para_externos) VALUES (?, ?, ?, ?, ?)',
+        [nombre, descripcion, fecha_inicio, fecha_fin, para_externos ? 1 : 0]
     );
-    return { id: result.insertId, nombre, descripcion };
+    return { id: result.insertId, nombre, descripcion, para_externos };
 };
 
 Encuesta.getAll = async () => {
@@ -48,15 +48,6 @@ Encuesta.findById = async (id) => {
     return rows[0];
 };
 
-// --- CRUD de Items de Encuesta ---
-Encuesta.addItem = async (id_encuesta, { id_resultado_aprendizaje, criterio_path, indicador_path, orden }) => {
-    const [result] = await pool.execute(
-        'INSERT INTO encuesta_items (id_encuesta, id_resultado_aprendizaje, criterio_path, indicador_path, orden) VALUES (?, ?, ?, ?, ?)',
-        [id_encuesta, id_resultado_aprendizaje, criterio_path, indicador_path, orden]
-    );
-    return { id: result.insertId };
-};
-
 Encuesta.addPregunta = async (id_encuesta, { id_resultado_aprendizaje, criterio_path, indicador_path, texto, orden, obligatorio }) => {
     const [result] = await pool.execute(
         'INSERT INTO encuesta_preguntas (id_encuesta, id_resultado_aprendizaje, criterio_path, indicador_path, texto, orden, obligatorio) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -66,10 +57,13 @@ Encuesta.addPregunta = async (id_encuesta, { id_resultado_aprendizaje, criterio_
 };
 
 // --- Lógica de Respuestas ---
-Encuesta.addRespuesta = async ({ id_encuesta_item, usuario_id, nivel_seleccionado, comentario }) => {
+Encuesta.addRespuesta = async ({ id_encuesta_pregunta, usuario_id = null, id_invitacion = null, nombre_nivel_seleccionado, comentario }) => {
+    if (!usuario_id && !id_invitacion) {
+        throw new Error('Debe proporcionar un usuario_id o un id_invitacion para la respuesta.');
+    }
     const [result] = await pool.execute(
-        'INSERT INTO encuesta_respuestas (id_encuesta_item, usuario_id, nivel_seleccionado, comentario) VALUES (?, ?, ?, ?)',
-        [id_encuesta_item, usuario_id, nivel_seleccionado, comentario]
+        'INSERT INTO encuesta_respuestas (id_encuesta_pregunta, usuario_id, id_invitacion, nombre_nivel_seleccionado, comentario) VALUES (?, ?, ?, ?, ?)',
+        [id_encuesta_pregunta, usuario_id, id_invitacion, nombre_nivel_seleccionado, comentario]
     );
     return { id: result.insertId };
 };
@@ -81,59 +75,62 @@ Encuesta.getFullEncuestaById = async (id) => {
 
     const encuesta = encuestaRows[0];
     
-    const [preguntasRows] = await pool.execute('SELECT * FROM encuesta_preguntas WHERE id_encuesta = ? ORDER BY orden', [id]);
-
-    const [itemsRows] = await pool.execute(`
+    const [preguntasRows] = await pool.execute(`
         SELECT 
-            ei.id,
-            ei.orden,
-            ei.obligatorio,
-            ra.codigo,
-            ra.estructura,
-            ei.criterio_path,
-            ei.indicador_path
-        FROM encuesta_items ei
-        JOIN resultados_aprendizaje ra ON ei.id_resultado_aprendizaje = ra.id
-        WHERE ei.id_encuesta = ?
-        ORDER BY ei.orden
+            ep.*,
+            ra.codigo as resultado_codigo,
+            ra.estructura
+        FROM encuesta_preguntas ep
+        JOIN resultados_aprendizaje ra ON ep.id_resultado_aprendizaje = ra.id
+        WHERE ep.id_encuesta = ?
+        ORDER BY ep.orden
     `, [id]);
 
-    // Extraemos la información relevante usando la función auxiliar resolveJsonPath
-    const items = itemsRows.map(item => {
-        const estructura = item.estructura; // Ya es un objeto
-        const criterio = resolveJsonPath(estructura, item.criterio_path);
-        const indicador = resolveJsonPath(estructura, item.indicador_path);
-        
+    const preguntasProcesadas = preguntasRows.map(pregunta => {
+        const estructura = pregunta.estructura;
+        const criterio = resolveJsonPath(estructura, pregunta.criterio_path);
+        const indicador = resolveJsonPath(estructura, pregunta.indicador_path);
+
         return {
-            id: item.id,
-            orden: item.orden,
-            obligatorio: item.obligatorio,
-            resultado_codigo: item.codigo,
-            criterio_nombre: criterio.nombre,
-            indicador_nombre: indicador.nombre,
-            descriptores: indicador.descriptores,
-            niveles: estructura.niveles
+            ...pregunta,
+            resultado_codigo: pregunta.resultado_codigo,
+            criterio_nombre: criterio ? criterio.nombre : null,
+            indicador_nombre: indicador ? indicador.nombre : null,
+            descriptores: indicador ? indicador.descriptores : null,
+            niveles_desempeno: estructura ? estructura.niveles : null, // Extraer los niveles de desempeño de la estructura
         };
     });
 
-    return { ...encuesta, items, preguntas: preguntasRows };
+    return { ...encuesta, preguntas: preguntasProcesadas };
 };
 
 Encuesta.getResultados = async (id_encuesta) => {
     const [rows] = await pool.execute(`
         SELECT 
             er.id,
-            er.nivel_seleccionado,
             er.comentario,
             er.fecha_respuesta,
-            ei.id as id_encuesta_item,
+            ep.id as id_encuesta_pregunta,
+            ep.texto as pregunta_texto,
+            ep.criterio_path,
+            ep.indicador_path,
+            ra.codigo as resultado_codigo,
+            er.nombre_nivel_seleccionado, -- Obtener directamente el nombre del nivel seleccionado
             u.usuario,
-            u.nombre_completo
+            u.nombre_completo,
+            ei.lugar,
+            ei.tipo_empresa,
+            ei.giro,
+            ei.egresados_universidad,
+            ei.pin as invitacion_pin
         FROM encuesta_respuestas er
-        JOIN encuesta_items ei ON er.id_encuesta_item = ei.id
+        JOIN encuesta_preguntas ep ON er.id_encuesta_pregunta = ep.id
+        LEFT JOIN resultados_aprendizaje ra ON ep.id_resultado_aprendizaje = ra.id
         LEFT JOIN usuarios u ON er.usuario_id = u.id
-        WHERE ei.id_encuesta = ?
+        LEFT JOIN encuesta_invitaciones ei ON er.id_invitacion = ei.id -- Unir con la tabla de invitaciones
+        WHERE ep.id_encuesta = ?
     `, [id_encuesta]);
+    
     return rows;
 }
 
