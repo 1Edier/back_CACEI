@@ -83,6 +83,14 @@ ResultadoAprendizaje.delete = async (id, usuarioAuditoria) => {
         await conn.beginTransaction();
         await conn.execute('SET @usuario_id = ?, @usuario_nombre = ?', [usuarioAuditoria.id, usuarioAuditoria.nombre]);
         
+        // Primero, eliminar los registros dependientes
+        // 1. Eliminar de resultados_aprendizaje_historial
+        await conn.execute('DELETE FROM resultados_aprendizaje_historial WHERE id_resultado_aprendizaje = ?', [id]);
+
+        // 2. Eliminar de encuesta_preguntas
+        await conn.execute('DELETE FROM encuesta_preguntas WHERE id_resultado_aprendizaje = ?', [id]);
+
+        // Luego, eliminar el resultado de aprendizaje principal
         const [result] = await conn.execute('DELETE FROM resultados_aprendizaje WHERE id = ?', [id]);
         
         await conn.execute('SET @usuario_id = NULL, @usuario_nombre = NULL');

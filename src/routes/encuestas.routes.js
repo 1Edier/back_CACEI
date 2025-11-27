@@ -6,7 +6,7 @@ const {
     getAllEncuestas,
     getEncuestaCompleta,
     submitRespuesta,
-    submitRespuestaExterna, // Nueva función para respuestas externas
+    submitFullEncuestaExterna, // Nueva función para respuestas externas completas
     getEncuestaResultados,
     createEncuestaInvitacion, // Nueva función para crear invitaciones
     validateEncuestaInvitacionByPin // Nueva función para validar invitaciones
@@ -21,8 +21,8 @@ router.route('/')
 // Enviar una respuesta (cualquier usuario logueado)
 router.post('/respuestas', protect, submitRespuesta);
 
-// Enviar una respuesta de una encuesta externa (sin autenticación)
-router.post('/respuestas/externas', submitRespuestaExterna);
+// Enviar una encuesta externa completa (sin autenticación)
+router.post('/respuestas/externas/completa', submitFullEncuestaExterna);
 
 // Crear una invitación para encuesta externa (admin, coordinador)
 router.post('/:id/invitaciones', protect, authorize('administrador', 'coordinador'), createEncuestaInvitacion);

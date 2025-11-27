@@ -13,29 +13,33 @@ function generatePin(length = 6) {
     return result;
 }
 
-EncuestaInvitacion.create = async ({ id_encuesta }) => {
+EncuestaInvitacion.create = async ({ id_encuesta, pin = null, lugar = null, tipo_empresa = null, giro = null, egresados_universidad = null, usada_por = null, fecha_uso = null }) => {
     const conn = await pool.getConnection();
     try {
         await conn.beginTransaction();
         
-        let pin;
-        let isUnique = false;
-        while (!isUnique) {
-            pin = generatePin();
-            const [existingPin] = await conn.execute('SELECT id FROM encuesta_invitaciones WHERE pin = ?', [pin]);
-            if (existingPin.length === 0) {
-                isUnique = true;
+        // Si no se proporciona un PIN, generarlo y asegurar que sea único
+        if (pin === null) {
+            let generatedPin;
+            let isUnique = false;
+            while (!isUnique) {
+                generatedPin = generatePin();
+                const [existingPin] = await conn.execute('SELECT id FROM encuesta_invitaciones WHERE pin = ?', [generatedPin]);
+                if (existingPin.length === 0) {
+                    isUnique = true;
+                }
             }
+            pin = generatedPin;
         }
 
         const [result] = await conn.execute(
-            'INSERT INTO encuesta_invitaciones (id_encuesta, pin, lugar, tipo_empresa, giro, egresados_universidad) VALUES (?, ?, NULL, NULL, NULL, NULL)',
-            [id_encuesta, pin]
+            'INSERT INTO encuesta_invitaciones (id_encuesta, pin, lugar, tipo_empresa, giro, egresados_universidad, usada_por, fecha_uso) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [id_encuesta, pin, lugar, tipo_empresa, giro, egresados_universidad, usada_por, fecha_uso]
         );
         
         await conn.commit();
         
-        return { id: result.insertId, id_encuesta, pin };
+        return { id: result.insertId, id_encuesta, pin, lugar, tipo_empresa, giro, egresados_universidad, usada_por, fecha_uso };
     } catch (error) {
         await conn.rollback();
         throw error;
@@ -60,16 +64,19 @@ EncuestaInvitacion.findByPin = async (pin) => {
     return rows[0];
 };
 
-EncuestaInvitacion.markAsUsed = async (id_invitacion, usada_por) => {
-    await pool.execute(
-        'UPDATE encuesta_invitaciones SET usada_por = ?, fecha_uso = CURRENT_TIMESTAMP WHERE id = ?',
-        [usada_por, id_invitacion]
+// Nueva función para encontrar invitaciones por id de encuesta (solo las que tienen PIN)
+EncuestaInvitacion.findByEncuestaId = async (id_encuesta) => {
+    const [rows] = await pool.execute(
+        'SELECT id, pin FROM encuesta_invitaciones WHERE id_encuesta = ? AND pin IS NOT NULL',
+        [id_encuesta]
     );
+    return rows;
 };
 
-EncuestaInvitacion.updateExternalData = async (id_invitacion, { lugar, tipo_empresa, giro, egresados_universidad, usada_por }) => {
+// Nueva función para guardar los datos del encuestado para una sesión de invitación
+EncuestaInvitacion.saveEncuestadoData = async (id_invitacion, { lugar, tipo_empresa, giro, egresados_universidad, usada_por }) => {
     await pool.execute(
-        'UPDATE encuesta_invitaciones SET lugar = ?, tipo_empresa = ?, giro = ?, egresados_universidad = ?, usada_por = ?, fecha_uso = CURRENT_TIMESTAMP WHERE id = ? AND usada_por IS NULL',
+        'UPDATE encuesta_invitaciones SET lugar = ?, tipo_empresa = ?, giro = ?, egresados_universidad = ?, usada_por = ?, fecha_uso = CURRENT_TIMESTAMP WHERE id = ?',
         [lugar, tipo_empresa, giro, egresados_universidad, usada_por, id_invitacion]
     );
 };
