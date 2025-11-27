@@ -1,4 +1,5 @@
 // controllers/encuestas.controller.js
+const pool = require('../config/db'); // Importar el pool de conexiones
 const Encuesta = require('../models/encuesta.model');
 const EncuestaInvitacion = require('../models/encuestaInvitacion.model'); // Importar el nuevo modelo
 
@@ -69,49 +70,60 @@ exports.submitRespuesta = async (req, res, next) => {
     }
 };
 
-// Nueva función para enviar respuestas de encuestas externas
-exports.submitRespuestaExterna = async (req, res, next) => {
+// Nueva función para enviar una encuesta externa completa
+exports.submitFullEncuestaExterna = async (req, res, next) => {
+    const conn = await pool.getConnection(); // Obtener una conexión para la transacción
     try {
-        const { id_encuesta_pregunta, nombre_nivel_seleccionado, comentario, id_invitacion, nombre_encuestado, lugar, tipo_empresa, giro, egresados_universidad } = req.body;
+        await conn.beginTransaction(); // Iniciar la transacción
 
-        if (!id_invitacion) {
-            return res.status(400).json({ message: 'Se requiere un ID de invitación para respuestas externas.' });
-        }
+        const {
+            id_encuesta_base,
+            nombre_encuestado,
+            lugar,
+            tipo_empresa,
+            giro,
+            egresados_universidad,
+            respuestas // Array de respuestas
+        } = req.body;
 
-        const invitacionExistente = await EncuestaInvitacion.findById(id_invitacion); // Ahora usamos findById
-        if (!invitacionExistente) {
-            return res.status(404).json({ message: 'Invitación no encontrada.' });
-        }
-
-        // Si es la primera respuesta de esta invitación, actualizamos los datos externos
-        if (!invitacionExistente.fecha_uso) { // Asumiendo que 'fecha_uso' es NULL si no ha sido usada
-            await EncuestaInvitacion.updateExternalData(invitacionExistente.id, {
-                lugar,
-                tipo_empresa,
-                giro,
-                egresados_universidad,
-                usada_por: nombre_encuestado // El nombre del encuestado que acaba de llenar el formulario
-            });
-        }
-        
-        const respuesta = await Encuesta.addRespuesta({
-            id_encuesta_pregunta,
-            id_invitacion: invitacionExistente.id, // Usar el ID de la invitación encontrada
-            nombre_nivel_seleccionado,
-            comentario
+        // 1. Crear una nueva invitación con los datos del encuestado (una sola vez)
+        const nuevaInvitacion = await EncuestaInvitacion.create({
+            id_encuesta: id_encuesta_base,
+            pin: null, // No se genera un nuevo PIN aquí, es una "sesión" de respuesta
+            lugar,
+            tipo_empresa,
+            giro,
+            egresados_universidad,
+            usada_por: nombre_encuestado,
+            fecha_uso: new Date(), // Marcar como usada
         });
 
-        res.status(201).json({ message: 'Respuesta externa guardada exitosamente', respuesta });
+        // 2. Guardar todas las respuestas asociadas a esta única invitación
+        const respuestaPromises = respuestas.map(resp =>
+            Encuesta.addRespuesta({
+                id_encuesta_pregunta: parseInt(resp.id_encuesta_pregunta),
+                id_invitacion: nuevaInvitacion.id,
+                nombre_nivel_seleccionado: resp.nombre_nivel_seleccionado,
+                comentario: resp.comentario || '',
+            })
+        );
+        await Promise.all(respuestaPromises);
+
+        await conn.commit(); // Confirmar la transacción
+
+        res.status(201).json({ message: 'Encuesta externa guardada exitosamente' });
     } catch (error) {
+        await conn.rollback(); // Revertir la transacción en caso de error
         next(error);
+    } finally {
+        conn.release(); // Liberar la conexión
     }
 };
 
-// Nueva función para crear una invitación de encuesta externa
+// Nueva función para crear una invitación de encuesta externa (base, con PIN)
 exports.createEncuestaInvitacion = async (req, res, next) => {
     try {
         const { id } = req.params; // id de la encuesta
-        // Los datos externos (lugar, tipo_empresa, giro, egresados_universidad) ya NO se reciben aquí.
 
         const encuesta = await Encuesta.findById(id);
         if (!encuesta) {
@@ -121,7 +133,7 @@ exports.createEncuestaInvitacion = async (req, res, next) => {
             return res.status(400).json({ message: 'Esta encuesta no está configurada para invitaciones externas.' });
         }
 
-        const invitacion = await EncuestaInvitacion.create({ // Solo se pasa id_encuesta
+        const invitacion = await EncuestaInvitacion.create({ // Solo se pasa id_encuesta y se genera PIN
             id_encuesta: id,
         });
 
@@ -135,19 +147,22 @@ exports.createEncuestaInvitacion = async (req, res, next) => {
 exports.validateEncuestaInvitacionByPin = async (req, res, next) => {
     try {
         const { pin } = req.params;
-        const invitacion = await EncuestaInvitacion.findByPin(pin);
+        const invitacionBase = await EncuestaInvitacion.findByPin(pin);
 
-        if (!invitacion) {
+        if (!invitacionBase) {
             return res.status(404).json({ message: 'PIN de invitación no válido o no encontrado.' });
         }
-        
-        // Obtener la encuesta completa para el PIN (incluyendo preguntas y niveles)
-        const encuestaCompleta = await Encuesta.getFullEncuestaById(invitacion.id_encuesta);
+
+        // Obtener la encuesta completa para el id_encuesta de la invitación base
+        const encuestaCompleta = await Encuesta.getFullEncuestaById(invitacionBase.id_encuesta);
         if (!encuestaCompleta) {
             return res.status(404).json({ message: 'Encuesta asociada a la invitación no encontrada.' });
         }
 
-        res.json({ invitacion, encuesta: encuestaCompleta });
+        // Devolver la encuesta completa y el id_encuesta de la invitación base
+        // NOTA: NO se crea una nueva entrada en la BD en este punto.
+        // La "sesión" de invitación se crea al momento de enviar el formulario.
+        res.json({ encuesta: encuestaCompleta, id_encuesta_base: invitacionBase.id_encuesta, pin: invitacionBase.pin });
     } catch (error) {
         next(error);
     }
@@ -156,8 +171,11 @@ exports.validateEncuestaInvitacionByPin = async (req, res, next) => {
 
 exports.getEncuestaResultados = async (req, res, next) => {
     try {
-        const resultados = await Encuesta.getResultados(req.params.id);
-        res.json(resultados);
+        const idEncuesta = req.params.id;
+        const resultados = await Encuesta.getResultados(idEncuesta);
+        const invitaciones = await EncuestaInvitacion.findByEncuestaId(idEncuesta); // Obtener invitaciones base
+
+        res.json({ resultados, invitaciones }); // Devolver resultados e invitaciones
     } catch (error) {
         next(error);
     }
