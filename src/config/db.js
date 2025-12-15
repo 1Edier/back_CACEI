@@ -1,8 +1,21 @@
 // config/db.js
 const mysql = require('mysql2/promise');
 const dotenv = require('dotenv');
-const fs = require('fs');
+
 dotenv.config();
+
+// Configuración SSL
+const getSslConfig = () => {
+    if (process.env.CA_CERT) {
+        return {
+            ca: process.env.CA_CERT,
+            rejectUnauthorized: false // false porque es auto-firmado
+        };
+    }
+    return {
+        rejectUnauthorized: false
+    };
+};
 
 const pool = mysql.createPool({
     host: process.env.DB_HOST,
@@ -13,10 +26,7 @@ const pool = mysql.createPool({
     connectionLimit: 10,
     connectTimeout: 60000,
     port: process.env.DB_PORT,
-    ssl: {
-    ca: fs.readFileSync('./ca.pem'),
-    rejectUnauthorized: true
-  }
+    ssl: getSslConfig()
 });
 
 // Función para verificar la conexión
