@@ -80,25 +80,47 @@ ResultadoAprendizaje.update = async (id, { codigo, descripcion, estructura }, us
 ResultadoAprendizaje.delete = async (id, usuarioAuditoria) => {
     const conn = await pool.getConnection();
     try {
+        // Verificar si el resultado de aprendizaje está vinculado a alguna encuesta
+        const [encuestasVinculadas] = await conn.execute(
+            'SELECT COUNT(*) as count FROM encuesta_preguntas WHERE id_resultado_aprendizaje = ?',
+            [id]
+        );
+
+        if (encuestasVinculadas[0].count > 0) {
+            const error = new Error('No se puede eliminar este resultado de aprendizaje porque está vinculado a una o más encuestas');
+            error.statusCode = 400;
+            throw error;
+        }
+
         await conn.beginTransaction();
+
+        // Desactivar temporalmente las verificaciones de claves foráneas
+        await conn.execute('SET FOREIGN_KEY_CHECKS = 0');
+
         await conn.execute('SET @usuario_id = ?, @usuario_nombre = ?', [usuarioAuditoria.id, usuarioAuditoria.nombre]);
-        
-        // Primero, eliminar los registros dependientes
-        // 1. Eliminar de resultados_aprendizaje_historial
+
+        // Primero eliminar el resultado de aprendizaje principal
+        const [result] = await conn.execute('DELETE FROM resultados_aprendizaje WHERE id = ?', [id]);
+
+        // Luego eliminar el historial
         await conn.execute('DELETE FROM resultados_aprendizaje_historial WHERE id_resultado_aprendizaje = ?', [id]);
 
-        // 2. Eliminar de encuesta_preguntas
-        await conn.execute('DELETE FROM encuesta_preguntas WHERE id_resultado_aprendizaje = ?', [id]);
-
-        // Luego, eliminar el resultado de aprendizaje principal
-        const [result] = await conn.execute('DELETE FROM resultados_aprendizaje WHERE id = ?', [id]);
-        
         await conn.execute('SET @usuario_id = NULL, @usuario_nombre = NULL');
+
+        // Reactivar las verificaciones de claves foráneas
+        await conn.execute('SET FOREIGN_KEY_CHECKS = 1');
+
         await conn.commit();
-        
+
         return result.affectedRows > 0;
     } catch (error) {
         await conn.rollback();
+        // Asegurarse de reactivar las verificaciones de claves foráneas incluso si hay error
+        try {
+            await conn.execute('SET FOREIGN_KEY_CHECKS = 1');
+        } catch (e) {
+            // Ignorar error al reactivar
+        }
         throw error;
     } finally {
         conn.release();

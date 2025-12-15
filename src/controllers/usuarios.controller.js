@@ -1,6 +1,30 @@
 // controllers/usuarios.controller.js
 const Usuario = require('../models/usuario.model');
 
+exports.createUsuario = async (req, res, next) => {
+    try {
+        const { usuario, contrasena, rol, nombre_completo, email } = req.body;
+
+        // Validar que el email no exista
+        const existingUser = await Usuario.findByEmail(email);
+        if (existingUser) {
+            return res.status(400).json({ message: 'El email ya está registrado' });
+        }
+
+        const nuevoUsuario = await Usuario.create({
+            usuario,
+            contrasena,
+            rol: rol || 'administrador', // Por defecto administrador
+            nombre_completo,
+            email
+        });
+
+        res.status(201).json({ message: 'Usuario creado exitosamente', usuario: nuevoUsuario });
+    } catch (error) {
+        next(error);
+    }
+};
+
 exports.getAllUsuarios = async (req, res, next) => {
     try {
         const usuarios = await Usuario.getAll();

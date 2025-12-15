@@ -15,8 +15,8 @@ Usuario.create = async ({ usuario, contrasena, rol, nombre_completo, email }) =>
     return { id: result.insertId, usuario, rol, nombre_completo, email };
 };
 
-Usuario.findByUsername = async (username) => {
-    const [rows] = await pool.execute('SELECT * FROM usuarios WHERE usuario = ? AND activo = TRUE', [username]);
+Usuario.findByEmail = async (email) => {
+    const [rows] = await pool.execute('SELECT * FROM usuarios WHERE email = ? AND activo = TRUE', [email]);
     return rows[0];
 };
 

@@ -106,7 +106,7 @@ Encuesta.getFullEncuestaById = async (id) => {
 
 Encuesta.getResultados = async (id_encuesta) => {
     const [rows] = await pool.execute(`
-        SELECT 
+        SELECT
             er.id,
             er.comentario,
             er.fecha_respuesta,
@@ -122,7 +122,8 @@ Encuesta.getResultados = async (id_encuesta) => {
             ei.tipo_empresa,
             ei.giro,
             ei.egresados_universidad,
-            ei.pin as invitacion_pin
+            ei.pin as invitacion_pin,
+            ei.usada_por
         FROM encuesta_respuestas er
         JOIN encuesta_preguntas ep ON er.id_encuesta_pregunta = ep.id
         LEFT JOIN resultados_aprendizaje ra ON ep.id_resultado_aprendizaje = ra.id
@@ -130,7 +131,7 @@ Encuesta.getResultados = async (id_encuesta) => {
         LEFT JOIN encuesta_invitaciones ei ON er.id_invitacion = ei.id -- Unir con la tabla de invitaciones
         WHERE ep.id_encuesta = ?
     `, [id_encuesta]);
-    
+
     return rows;
 }
 

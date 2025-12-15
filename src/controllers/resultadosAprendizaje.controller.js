@@ -54,6 +54,10 @@ exports.deleteResultado = async (req, res, next) => {
         }
         res.json({ message: 'Resultado de aprendizaje eliminado exitosamente' });
     } catch (error) {
+        // Si el error tiene un statusCode, lo usamos
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({ message: error.message });
+        }
         next(error);
     }
 };

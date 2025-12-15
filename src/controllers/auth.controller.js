@@ -21,16 +21,16 @@ exports.register = async (req, res, next) => {
 };
 
 exports.login = async (req, res, next) => {
-    const { usuario, contrasena } = req.body;
+    const { email, contrasena } = req.body;
     try {
-        const user = await Usuario.findByUsername(usuario);
+        const user = await Usuario.findByEmail(email);
         if (user && (await Usuario.comparePassword(contrasena, user.contrasena))) {
             res.json({
                 message: 'Login exitoso',
                 token: generateToken(user.id),
                 usuario: {
                     id: user.id,
-                    usuario: user.usuario,
+                    email: user.email,
                     nombre_completo: user.nombre_completo,
                     rol: user.rol
                 }
