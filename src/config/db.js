@@ -1,7 +1,7 @@
 // config/db.js
 const mysql = require('mysql2/promise');
 const dotenv = require('dotenv');
-
+const fs = require('fs');
 dotenv.config();
 
 const pool = mysql.createPool({
@@ -11,7 +11,12 @@ const pool = mysql.createPool({
     database: process.env.DB_NAME,
     waitForConnections: true,
     connectionLimit: 10,
-    queueLimit: 0
+    connectTimeout: 60000,
+    port: process.env.DB_PORT,
+    ssl: {
+    ca: fs.readFileSync('./ca.pem'),
+    rejectUnauthorized: true
+  }
 });
 
 // Función para verificar la conexión
